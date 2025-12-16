@@ -80,11 +80,8 @@
 
 /* Logout Button */
 .logout-btn {
-  margin: 15px 0;
-  text-align: center;
-}
-
-.logout-btn button {
+  display: block;
+  margin: 15px auto;
   padding: 12px 24px;
   background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
   color: white;
@@ -98,13 +95,13 @@
   min-width: 120px;
 }
 
-.logout-btn button:hover {
+.logout-btn:hover {
   background: linear-gradient(135deg, #c82333 0%, #a71e2a 100%);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
 }
 
-.logout-btn button:active {
+.logout-btn:active {
   transform: translateY(0);
   box-shadow: 0 2px 6px rgba(220, 53, 69, 0.2);
 }

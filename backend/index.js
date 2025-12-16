@@ -1,11 +1,13 @@
-const port = 8000
+require('dotenv').config()
+
+const port = process.env.PORT || 8000
 const express = require('express')
 const path = require("path")
 const cookieParser = require('cookie-parser')
 const cors = require('cors')
 
 const mongoose = require('mongoose')
-mongoose.connect("mongodb://localhost:27017/chatapp").then(() => console.log("✅ MongoDB connected"))
+mongoose.connect(process.env.MONGODB_URI || "mongodb://localhost:27017/chatapp").then(() => console.log("✅ MongoDB connected"))
 
 // Add connection monitoring
 mongoose.connection.on('error', (err) => {
@@ -205,8 +207,15 @@ io.on("connection", (socket) => {
         io.to(data.room).emit("chat message" ,{
             _id: newMessage._id,
             username : data.username,
-            message : data.message
+            message : data.message,
+            createdAt: newMessage.createdAt
         })
+    })
+
+    // Handle socket disconnection
+    socket.on('disconnect', () => {
+        console.log(`❌ User disconnected: ${socket.authenticatedUser}`)
+        // Socket.io automatically removes socket from all rooms on disconnect
     })
 })
 

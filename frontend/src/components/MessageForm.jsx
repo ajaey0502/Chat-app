@@ -65,7 +65,7 @@ const MessageForm = ({ onSendMessage, onFileUpload }) => {
           className="file-upload-btn" 
           onClick={triggerFileInput}
           disabled={isUploading}
-          title="Upload image or video"
+          title="Upload image, video, or PDF"
         >
           📎
         </button>
@@ -82,7 +82,7 @@ const MessageForm = ({ onSendMessage, onFileUpload }) => {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*,video/*,.pdf"
         onChange={handleFileSelect}
         style={{ display: 'none' }}
       />

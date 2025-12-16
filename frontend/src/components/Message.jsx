@@ -7,6 +7,17 @@ const Message = ({ message, isOwn, onEdit, onDelete }) => {
   const hasFile = message.fileUrl && message.fileType
   const isImage = message.fileType === 'image'
   const isVideo = message.fileType === 'video'
+  const isPdf = message.fileType === 'pdf'
+
+  // Check if message is within 15 minutes (900000 milliseconds)
+  const isWithin15Minutes = () => {
+    const messageTime = new Date(message.createdAt).getTime()
+    const currentTime = Date.now()
+    const timeDiff = currentTime - messageTime
+    return timeDiff <= 15 * 60 * 1000 // 15 minutes in milliseconds
+  }
+
+  const canModify = isWithin15Minutes()
 
   const handleEdit = () => {
     setIsEditing(true)
@@ -25,9 +36,7 @@ const Message = ({ message, isOwn, onEdit, onDelete }) => {
   }
 
   const handleDelete = () => {
-    if (window.confirm("Delete this message?")) {
-      onDelete(message._id)
-    }
+    onDelete(message._id)
   }
 
   const handleKeyPress = (e) => {
@@ -83,18 +92,30 @@ const Message = ({ message, isOwn, onEdit, onDelete }) => {
                     </video>
                   </div>
                 )}
+                {isPdf && (
+                  <div className="pdf-container">
+                    <a 
+                      href={message.fileUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="pdf-link"
+                    >
+                      📄 {message.fileName || 'View PDF'}
+                    </a>
+                  </div>
+                )}
               </div>
             ) : (
               <span className="message-text">{message.message}</span>
             )}
           </span>
-          {isOwn && !hasFile && (
+          {isOwn && canModify && !hasFile && (
             <div className="message-actions">
               <button onClick={handleEdit} className="edit-btn">Edit</button>
               <button onClick={handleDelete} className="delete-btn">Delete</button>
             </div>
           )}
-          {isOwn && hasFile && (
+          {isOwn && canModify && hasFile && (
             <div className="message-actions">
               <button onClick={handleDelete} className="delete-btn">Delete</button>
             </div>

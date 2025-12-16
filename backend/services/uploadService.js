@@ -29,14 +29,14 @@ class UploadService {
 
     setupFileFilter() {
         this.fileFilter = (req, file, cb) => {
-            const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|webm|webp/
+            const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|webm|webp|pdf/
             const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase())
-            const mimetype = allowedTypes.test(file.mimetype)
+            const mimetype = allowedTypes.test(file.mimetype) || file.mimetype === 'application/pdf'
             
             if (mimetype && extname) {
                 return cb(null, true)
             } else {
-                cb(new Error('Only images and videos are allowed!'))
+                cb(new Error('Only images, videos, and PDFs are allowed!'))
             }
         }
     }
@@ -56,11 +56,14 @@ class UploadService {
     }
 
     getFileType(mimetype) {
-        return mimetype.startsWith('image/') ? 'image' : 'video';
+        if (mimetype.startsWith('image/')) return 'image';
+        if (mimetype.startsWith('video/')) return 'video';
+        if (mimetype === 'application/pdf') return 'pdf';
+        return 'file';
     }
 
     generateFileUrl(filename) {
-        return `/chat/uploads/${filename}`;
+        return `/uploads/${filename}`;
     }
 
     deleteFile(filename) {

@@ -142,9 +142,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
 
       {error && <div className="error-message">{error}</div>}
 
-      <div className="logout-btn">
-        <button onClick={logout}>Logout</button>
-      </div>
+      <button onClick={logout} className="logout-btn">Logout</button>
         
       <div className="rooms-section">
         <div className="rooms-header">

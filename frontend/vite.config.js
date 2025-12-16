@@ -6,25 +6,19 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/socket.io': {
+      '/api': {
         target: 'http://localhost:8000',
-        ws: true,
         changeOrigin: true
       },
       '/chat': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        // Let SPA handle browser navigation to /chat
         bypass: (req) => {
           const accept = req.headers && req.headers.accept
           if (accept && accept.includes('text/html')) {
             return '/index.html'
           }
         }
-      },
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
       },
       '/uploads': {
         target: 'http://localhost:8000',

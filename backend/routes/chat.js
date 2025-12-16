@@ -545,6 +545,13 @@ module.exports = router;
 router.get("/uploads/:filename", (req, res) => {
     const filename = req.params.filename
     const filepath = path.join(__dirname, '..', 'uploads', filename)
+    
+    // Set appropriate Content-Type for PDFs
+    if (filename.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf')
+        res.setHeader('Content-Disposition', 'inline')
+    }
+    
     res.sendFile(filepath)
 })
 

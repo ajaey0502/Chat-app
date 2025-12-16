@@ -25,7 +25,7 @@ const Chat = ({ username, room, onLogout }) => {
     
     // Fetch room information for display
     fetchRoomInfo()
-  }, [username, room])
+  }, [username, room, navigate])
 
   const fetchRoomInfo = async () => {
     try {
@@ -54,8 +54,11 @@ const Chat = ({ username, room, onLogout }) => {
     }
 
     // Connect to socket with explicit server URL
-    const serverUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin
-    const newSocket = io(serverUrl)
+    const serverUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8000'
+    const newSocket = io(serverUrl, {
+      withCredentials: true,
+      transports: ['websocket', 'polling']
+    })
     setSocket(newSocket)
 
     // Join room
@@ -102,11 +105,18 @@ const Chat = ({ username, room, onLogout }) => {
       setMessages(prev => prev.filter(msg => msg._id !== messageId))
     })
 
-    // Cleanup on unmount
+    // Cleanup on unmount - remove all listeners
     return () => {
+      newSocket.off('join success')
+      newSocket.off('join error')
+      newSocket.off('user joined')
+      newSocket.off('prev')
+      newSocket.off('chat message')
+      newSocket.off('message edited')
+      newSocket.off('message deleted')
       newSocket.close()
     }
-  }, [username, room])
+  }, [username, room, navigate])
 
   useEffect(() => {
     // Auto-scroll to bottom
@@ -125,7 +135,13 @@ const Chat = ({ username, room, onLogout }) => {
   }
 
   const sendMessage = (message) => {
-    if (socket && message.trim()) {
+    if (!socket || !socket.connected) {
+      console.error('Socket not connected')
+      setError('Connection lost. Please refresh the page.')
+      return
+    }
+    
+    if (message.trim()) {
       socket.emit('chat message', {
         username,
         room,
@@ -277,9 +293,6 @@ const Chat = ({ username, room, onLogout }) => {
           <div className="header-actions">
             <button onClick={handleLeaveRoom} className="leave-btn">
               Leave Group
-            </button>
-            <button onClick={onLogout} className="logout-btn" title="Logout from app">
-              Logout
             </button>
           </div>
         </div>
