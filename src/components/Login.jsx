@@ -11,6 +11,8 @@ const Login = ({ setUser }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
+    
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
@@ -26,10 +28,11 @@ const Login = ({ setUser }) => {
         navigate('/dashboard')
       } 
       else {
-        setError(data.error)
+        setError(data.error || 'Login failed. Please try again.')
       }
     } catch (error) {
-      setError('Login failed')
+      console.error('Login error:', error)
+      setError('Login failed. Please check your connection and try again.')
     }
   }
 

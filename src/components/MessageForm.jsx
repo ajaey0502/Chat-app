@@ -16,9 +16,21 @@ const MessageForm = ({ onSendMessage, onFileUpload }) => {
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
     if (file) {
+      // Validate file size (max 10MB)
+      const maxSize = 10 * 1024 * 1024
+      if (file.size > maxSize) {
+        alert('File size exceeds 10MB limit')
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
+        return
+      }
+
       setIsUploading(true)
       try {
         await onFileUpload(file)
+        // Success feedback
+        console.log('File uploaded successfully')
       } catch (error) {
         console.error('File upload failed:', error)
         alert('File upload failed. Please try again.')

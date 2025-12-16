@@ -38,6 +38,23 @@ npm run dev
 
 The React app will be available at `http://localhost:3000` and will proxy API calls to your Express server at `http://localhost:8000`.
 
+### Windows PowerShell (recommended commands)
+
+```powershell
+Push-Location "C:\Users\bisht\Desktop\APP\chat-app - REACT"
+npm install
+npm run dev:full
+```
+
+### Troubleshooting (Blank Page / Navigation)
+
+- Ensure MongoDB is running locally and accessible at `mongodb://localhost:27017/chatapp`.
+- If you see a blank page, open the browser console for errors; React Router will redirect unauthenticated users from `/` to `/login`.
+- Try navigating directly to `/login`: `http://localhost:3000/login`.
+- We fixed an invalid hook usage in `src/components/Signup.jsx` (using `useNavigate()` inside the component). If you pulled before the fix, update and restart.
+- Vite dev server proxies API to `http://localhost:8000`; verify backend logs show `GET /api/me` on app load.
+- If ports are busy, stop any previous `node`/`vite` processes or change ports in `vite.config.js` / `index.js`.
+
 ### 3. Production Build
 
 ```bash
@@ -101,6 +118,12 @@ src/
 ## Environment Variables
 
 - `NODE_ENV=production` - Serves React build instead of redirecting to dev server
+
+## Quick Links
+
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Uploads: http://localhost:8000/uploads
 
 ## Notes
 

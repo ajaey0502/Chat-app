@@ -19,6 +19,14 @@ router.get("/", authenticateToken, async (req, res) => {
                 error: "Room name is required"
             })
         }
+        
+        // Validate room parameter - must be string and reasonable length
+        if (typeof room !== 'string' || room.length < 1 || room.length > 100) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid room name format"
+            })
+        }
 
         let roomExists = await Room.findOne({ name: room })
 
@@ -34,6 +42,14 @@ router.get("/", authenticateToken, async (req, res) => {
             return res.status(403).json({
                 success: false,
                 error: `You don't have access to private room "${room}"`
+            })
+        }
+
+        // Block banned users from joining (public or private)
+        if (roomExists.bannedMembers && roomExists.bannedMembers.includes(username)) {
+            return res.status(403).json({
+                success: false,
+                error: "You are banned from this room"
             })
         }
 
@@ -197,12 +213,45 @@ router.post("/createRoom", authenticateToken, async (req, res) => {
 router.post("/add-member", authenticateToken, async (req, res) => {
     try {
         const { room, newMembers} = req.body
- 
-        const membersToAdd = newMembers.split(",").map(u => u.trim())
+        const requester = req.user.username
+
+        if (!room || !newMembers) {
+            return res.status(400).json({
+                success: false,
+                error: "Room and newMembers are required"
+            })
+        }
+
+        const roomDoc = await Room.findOne({ name: room })
+        if (!roomDoc) {
+            return res.status(404).json({
+                success: false,
+                error: "Room not found"
+            })
+        }
+
+        // Only the room owner can add (and implicitly unban) members
+        if (roomDoc.owner !== requester) {
+            return res.status(403).json({
+                success: false,
+                error: "Only the room owner can add members"
+            })
+        }
+
+        const membersToAdd = newMembers.split(",").map(u => u.trim()).filter(Boolean)
+        if (membersToAdd.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "No valid members provided"
+            })
+        }
         
         await Room.updateOne(
             { name: room },
-            { $addToSet: { members: { $each: membersToAdd } } }
+            { 
+                $addToSet: { members: { $each: membersToAdd } },
+                $pull: { bannedMembers: { $in: membersToAdd } } // Unban when re-adding
+            }
         )
         
         // Add room to each new member's rooms list
@@ -228,25 +277,195 @@ router.post("/add-member", authenticateToken, async (req, res) => {
 
 ///////////////////////////////
 
+// Owner-only ban (public rooms): remove member and prevent rejoin
+router.post("/ban", authenticateToken, async (req, res) => {
+    try {
+        const owner = req.user.username
+        const { room, targetUser } = req.body
+
+        if (!room || !targetUser) {
+            return res.status(400).json({
+                success: false,
+                error: "Room and targetUser are required"
+            })
+        }
+
+        const roomDoc = await Room.findOne({ name: room })
+        if (!roomDoc) {
+            return res.status(404).json({
+                success: false,
+                error: "Room not found"
+            })
+        }
+
+        // Only owner can ban
+        if (roomDoc.owner !== owner) {
+            return res.status(403).json({
+                success: false,
+                error: "Only the room owner can ban members"
+            })
+        }
+
+        // Prevent banning self/owner
+        if (targetUser === owner) {
+            return res.status(400).json({
+                success: false,
+                error: "Owner cannot ban themselves"
+            })
+        }
+
+        // For public rooms: enforce ban list; private rooms already controlled by membership
+        if (roomDoc.isPrivate) {
+            return res.status(400).json({
+                success: false,
+                error: "Ban not needed for private rooms"
+            })
+        }
+
+        await Room.updateOne(
+            { name: room },
+            {
+                $pull: { members: targetUser },
+                $addToSet: { bannedMembers: targetUser }
+            }
+        )
+
+        // Remove room from target user's rooms list
+        await User.updateOne(
+            { username: targetUser },
+            { $pull: { rooms: room } }
+        )
+
+        return res.json({
+            success: true,
+            message: "User banned from room"
+        })
+    } catch (error) {
+        console.error('Ban member error:', error)
+        return res.status(500).json({
+            success: false,
+            error: "Server error"
+        })
+    }
+})
+
+///////////////////////////////
+
+// Owner can transfer room ownership to another member
+router.post("/transfer-ownership", authenticateToken, async (req, res) => {
+    try {
+        const owner = req.user.username
+        const { room, newOwner } = req.body
+
+        if (!room || !newOwner) {
+            return res.status(400).json({
+                success: false,
+                error: "Room and newOwner are required"
+            })
+        }
+
+        const roomDoc = await Room.findOne({ name: room })
+        if (!roomDoc) {
+            return res.status(404).json({
+                success: false,
+                error: "Room not found"
+            })
+        }
+
+        if (roomDoc.owner !== owner) {
+            return res.status(403).json({
+                success: false,
+                error: "Only the room owner can transfer ownership"
+            })
+        }
+
+        if (!roomDoc.members.includes(newOwner)) {
+            return res.status(400).json({
+                success: false,
+                error: "New owner must be a member of the room"
+            })
+        }
+
+        await Room.updateOne(
+            { name: room },
+            { $set: { owner: newOwner } }
+        )
+
+        return res.json({
+            success: true,
+            message: "Ownership transferred successfully",
+            newOwner
+        })
+    } catch (error) {
+        console.error('Transfer ownership error:', error)
+        return res.status(500).json({
+            success: false,
+            error: "Server error"
+        })
+    }
+})
+
+///////////////////////////////
+
 
 router.post("/leaveRoom", authenticateToken, async (req, res) => {
     try {
-        const { username, room } = req.body
-       
+        const username = req.user.username // Use authenticated user, not body
+        const { room } = req.body
+
+        if (!room) {
+            return res.status(400).json({
+                success: false,
+                error: "Room name is required"
+            })
+        }
+
+        const roomDoc = await Room.findOne({ name: room })
+        if (!roomDoc || !roomDoc.members.includes(username)) {
+            return res.status(404).json({
+                success: false,
+                error: "You are not a member of this room"
+            })
+        }
+
+        // If owner and only member, delete the room (and remove from user's rooms)
+        if (roomDoc.owner === username && roomDoc.members.length <= 1) {
+            await Message.deleteMany({ room })
+            await Room.deleteOne({ name: room })
+            await User.updateMany(
+                { rooms: room },
+                { $pull: { rooms: room } }
+            )
+            return res.json({
+                success: true,
+                message: "Room deleted because owner left and was the only member"
+            })
+        }
+
+        // If owner with other members, require ownership transfer first
+        if (roomDoc.owner === username && roomDoc.members.length > 1) {
+            return res.status(400).json({
+                success: false,
+                error: "Transfer ownership to another member before leaving"
+            })
+        }
+
+        // Non-owner leave flow
         await Room.updateOne(
             { name: room },
             { $pull: { members: username } }
         )
         await User.updateOne(
             { username },
-            { $pull: { rooms: room } }    
+            { $pull: { rooms: room } }
         )
-    
+
         return res.json({
             success: true,
             message : "Left room successfully"
         })
     } catch (error) {
+        console.error('Leave room error:', error)
         return res.status(500).json({
             success: false,
             error: "Server error"

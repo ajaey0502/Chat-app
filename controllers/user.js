@@ -11,9 +11,47 @@ const generateToken = (username) => {
     )
 }
 
+// Input validation helpers
+const validateSignupInput = (username, password) => {
+    // Username validation
+    if (!username || typeof username !== 'string') {
+        return { valid: false, error: 'Username is required' }
+    }
+    if (username.length < 3 || username.length > 20) {
+        return { valid: false, error: 'Username must be between 3 and 20 characters' }
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+        return { valid: false, error: 'Username can only contain letters, numbers, and underscores' }
+    }
+    
+    // Password validation (strong for signup)
+    if (!password || typeof password !== 'string') {
+        return { valid: false, error: 'Password is required' }
+    }
+    if (password.length < 8 || password.length > 100) {
+        return { valid: false, error: 'Password must be between 8 and 100 characters' }
+    }
+    // Require at least one uppercase, one lowercase, one digit, and one special character
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/.test(password)) {
+        return { valid: false, error: 'Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character (@$!%*?&)' }
+    }
+    
+    return { valid: true }
+}
+
 async function signUp(req, res) {
     try {
         const { username, password } = req.body
+        
+        // Validate input
+        const validation = validateSignupInput(username, password)
+        if (!validation.valid) {
+            return res.status(400).json({
+                success: false,
+                error: validation.error
+            })
+        }
+        
         const userExists = await User.findOne({ username })
         
         if (userExists) {
@@ -48,9 +86,29 @@ async function signUp(req, res) {
 async function login(req, res) {
     try {
         const { username, password } = req.body
-        const user = await User.findOne({ username, password })
+        
+        // Validate input
+        const validation = validateSignupInput(username, password)
+        if (!validation.valid) {
+            return res.status(400).json({
+                success: false,
+                error: validation.error
+            })
+        }
+        
+        const user = await User.findOne({ username })
 
         if (!user) {
+            return res.status(401).json({
+                success: false,
+                error: "Invalid username or password"
+            })
+        }
+        
+        // Compare password using bcrypt
+        const isPasswordValid = await user.comparePassword(password)
+        
+        if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
                 error: "Invalid username or password"

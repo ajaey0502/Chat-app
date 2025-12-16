@@ -13,7 +13,14 @@ export default defineConfig({
       },
       '/chat': {
         target: 'http://localhost:8000',
-        changeOrigin: true
+        changeOrigin: true,
+        // Let SPA handle browser navigation to /chat
+        bypass: (req) => {
+          const accept = req.headers && req.headers.accept
+          if (accept && accept.includes('text/html')) {
+            return '/index.html'
+          }
+        }
       },
       '/api': {
         target: 'http://localhost:8000',

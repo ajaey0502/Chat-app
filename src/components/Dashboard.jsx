@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './Dashboard.css'
 
 const Dashboard = ({ setCurrentRoom, username ,logout}) => {
   const [rooms, setRooms] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [roomName, setRoomName] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
@@ -26,7 +27,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
       console.log('Response status:', response.status)
       const data = await response.json()
       console.log('Response data:', data)
-      
+
       if (data.success) {
         setRooms(data.rooms)
         setError('')
@@ -43,16 +44,19 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
 
   const handleJoinRoom = async (room) => {
     setError('')
-    
+
     try {
       // Check if room exists and user can join
       const response = await fetch(`/chat?room=${room.name}`, {
         credentials: 'include' // Include cookies for JWT
       })
       const data = await response.json()
-      
+
       if (data.success) {
         setCurrentRoom(room.name)
+        // Persist selected room for reloads with timestamp
+        localStorage.setItem('currentRoom', room.name)
+        localStorage.setItem('currentRoomTimestamp', Date.now().toString())
         navigate('/chat')
       } else {
         setError(data.error)
@@ -65,9 +69,9 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
   const handleCreateRoom = async (e) => {
     e.preventDefault()
     setError('')
-    
+
     if (!roomName.trim()) return
-    
+
     try {
       const response = await fetch('/chat/createRoom', {
         method: 'POST',
@@ -78,9 +82,9 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
           isPrivate
         })
       })
-      
+
       const data = await response.json()
-      
+
       if (data.success) {
         // Refresh the rooms list
         await fetchRooms()
@@ -114,20 +118,38 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
     )
   }
 
+  const normalizedQuery = searchTerm.trim().toLowerCase()
+  
+  // Separate logic: joined rooms vs search results
+  const userJoinedRooms = rooms.filter((room) => room.members.includes(username))
+  
+  let displayedRooms = []
+  
+  if (normalizedQuery) {
+    // When searching, show matching public rooms (whether joined or not)
+    displayedRooms = rooms.filter((room) => {
+      if (room.isPrivate) return false // don't show private rooms in search
+      return room.name.toLowerCase().includes(normalizedQuery)
+    })
+  } else {
+    // When not searching, only show joined rooms
+    displayedRooms = userJoinedRooms
+  }
+
   return (
     <div className="dashboard-container">
       <h2>Welcome, {username}!</h2>
-      
+
       {error && <div className="error-message">{error}</div>}
-      
-         <div className = "logout-btn">
-         <button onClick = {logout}> Logout </button>
-        </div>
+
+      <div className="logout-btn">
+        <button onClick={logout}>Logout</button>
+      </div>
         
       <div className="rooms-section">
         <div className="rooms-header">
-          <h3>Available Rooms</h3>
-          <button 
+          <h3>{normalizedQuery ? 'Search Results' : 'My Rooms'}</h3>
+          <button
             className="add-room-btn"
             onClick={() => setShowCreateForm(true)}
             title="Create new room"
@@ -136,7 +158,14 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
           </button>
         </div>
 
-     
+        <div className="rooms-search">
+          <input
+            type="text"
+            placeholder="Search public rooms..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
 
         {showCreateForm && (
           <div className="create-room-form">
@@ -167,14 +196,18 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
         )}
 
         <div className="rooms-grid">
-          {rooms.length === 0 ? (
+          {displayedRooms.length === 0 ? (
             <div className="no-rooms">
-              <p>No rooms available. Create your first room!</p>
+              <p>
+                {normalizedQuery 
+                  ? 'No matching public rooms found. Try a different search.' 
+                  : 'You haven\'t joined any rooms yet. Search for public rooms to join!'}
+              </p>
             </div>
           ) : (
-            rooms.map((room) => (
-              <div 
-                key={room._id} 
+            displayedRooms.map((room) => (
+              <div
+                key={room._id}
                 className={`room-card ${room.isPrivate ? 'private' : 'public'}`}
                 onClick={() => handleJoinRoom(room)}
               >
@@ -182,14 +215,17 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
                   <h4>{room.name}</h4>
                   <div className="room-details">
                     <span className={`room-type ${room.isPrivate ? 'private' : 'public'}`}>
-                      {room.isPrivate ? '🔒 Private' : '🌐 Public'}
+                      {room.isPrivate ? ' Private' : ' Public'}
                     </span>
                     <span className="member-count">
-                      👥 {room.members.length} member{room.members.length !== 1 ? 's' : ''}
+                       {room.members.length} member{room.members.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                   {room.owner === username && (
                     <span className="owner-badge">Owner</span>
+                  )}
+                  {room.members.includes(username) && !normalizedQuery && (
+                    <span className="joined-badge"> Joined</span>
                   )}
                 </div>
               </div>

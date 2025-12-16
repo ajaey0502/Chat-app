@@ -14,7 +14,11 @@ const roomSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    members : [String]
+    members : [String],
+    bannedMembers: {
+        type: [String],
+        default: []
+    }
    }, {timestamps: true}
      )
 

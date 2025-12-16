@@ -30,11 +30,17 @@ const io = new Server(server,{
     }
 })
 
-// CORS configuration for development
-app.use(cors({
-    origin: 'http://localhost:3000',
+// CORS configuration - environment-aware
+const corsOptions = {
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
     credentials: true
-}))
+}
+
+if (process.env.NODE_ENV === 'production') {
+    console.log(`CORS enabled for: ${corsOptions.origin}`)
+}
+
+app.use(cors(corsOptions))
 
 // Serve React build files (for production)
 app.use(express.static(path.join(__dirname, 'dist')))
@@ -81,15 +87,64 @@ app.get('*', (req, res) => {
 })
 
 const Room = require("./models/room")
+const { verifyToken } = require("./middleware/auth")
+
+// Socket.io authentication middleware
+io.use((socket, next) => {
+    const cookies = socket.handshake.headers.cookie
+    
+    if (!cookies) {
+        return next(new Error('Authentication required'))
+    }
+    
+    // Parse cookies safely to extract authToken
+    const cookieObj = {}
+    cookies.split(';').forEach(cookie => {
+        const [key, value] = cookie.trim().split('=')
+        if (key && value) {
+            cookieObj[key.trim()] = decodeURIComponent(value)
+        }
+    })
+    
+    const token = cookieObj.authToken
+    
+    if (!token) {
+        return next(new Error('Authentication token not found'))
+    }
+    
+    // Verify token
+    const decoded = verifyToken(token)
+    
+    if (!decoded) {
+        return next(new Error('Invalid authentication token'))
+    }
+    
+    // Store authenticated username in socket
+    socket.authenticatedUser = decoded.username
+    next()
+})
 
 io.on("connection", (socket) => {
+    console.log(`✅ User connected: ${socket.authenticatedUser}`)
+    
     socket.on('join room', async ({ username, room }) => {
+        // Verify that the username matches the authenticated user
+        if (username !== socket.authenticatedUser) {
+            socket.emit('join error', { message: 'Username mismatch - authentication failed' })
+            return
+        }
         try {
             // Check if room exists and user has permission
             const roomDoc = await Room.findOne({ name: room })
             
             if (!roomDoc) {
                 socket.emit('join error', { message: 'Room not found' })
+                return
+            }
+
+            // Block banned users (public or private)
+            if (roomDoc.bannedMembers && roomDoc.bannedMembers.includes(username)) {
+                socket.emit('join error', { message: 'You are banned from this room' })
                 return
             }
             
@@ -102,6 +157,12 @@ io.on("connection", (socket) => {
             // Join the room
             socket.join(room)
             
+            // Notify user of successful join
+            socket.emit('join success', { message: `Joined room ${room}` })
+            
+            // Notify others in room
+            io.to(room).emit('user joined', { username, message: `${username} joined the room` })
+            
             // Get previous messages
             const prevMessages = await Message.find({ room }).sort({ createdAt: -1 }).limit(50)
             prevMessages.reverse()
@@ -112,7 +173,28 @@ io.on("connection", (socket) => {
             socket.emit('join error', { message: 'Server error' })
         }
     })
+    
     socket.on("chat message", async (data) => {
+        // Verify that the username matches the authenticated user
+        if (data.username !== socket.authenticatedUser) {
+            socket.emit('error', { message: 'Username mismatch - authentication failed' })
+            return
+        }
+
+        // Validate room and membership/bans before allowing message
+        const roomDoc = await Room.findOne({ name: data.room })
+        if (!roomDoc) {
+            socket.emit('error', { message: 'Room not found' })
+            return
+        }
+        if (roomDoc.bannedMembers && roomDoc.bannedMembers.includes(data.username)) {
+            socket.emit('error', { message: 'You are banned from this room' })
+            return
+        }
+        if (!roomDoc.members.includes(data.username)) {
+            socket.emit('error', { message: 'You must join the room before sending messages' })
+            return
+        }
 
         const newMessage = await Message.create({
             username : data.username,

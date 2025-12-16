@@ -10,6 +10,8 @@ const Chat = ({ username, room, onLogout }) => {
   const [socket, setSocket] = useState(null)
   const [roomInfo, setRoomInfo] = useState(null)
   const [isOwner, setIsOwner] = useState(false)
+  const [error, setError] = useState('')
+  const [isConnecting, setIsConnecting] = useState(true)
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
 
@@ -51,18 +53,31 @@ const Chat = ({ username, room, onLogout }) => {
       return
     }
 
-    // Connect to socket
-    const newSocket = io()
+    // Connect to socket with explicit server URL
+    const serverUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin
+    const newSocket = io(serverUrl)
     setSocket(newSocket)
 
     // Join room
     newSocket.emit('join room', { username, room })
 
+    // Handle join success
+    newSocket.on('join success', (data) => {
+      console.log('Successfully joined room:', data.message)
+      setIsConnecting(false)
+    })
+
     // Handle join errors
     newSocket.on('join error', (error) => {
       console.error('Join room error:', error.message)
-      alert(error.message)
-      navigate('/dashboard')
+      setError(error.message)
+      setIsConnecting(false)
+      setTimeout(() => navigate('/dashboard'), 2000)
+    })
+
+    // Listen for user joined notifications
+    newSocket.on('user joined', (data) => {
+      console.log(data.message)
     })
 
     // Listen for previous messages
@@ -75,17 +90,17 @@ const Chat = ({ username, room, onLogout }) => {
       setMessages(prev => [...prev, data])
     })
 
-     // EDIT: Replace message in same position
-      newSocket.on('message edited', (updatedMessage) => {
-    setMessages(prev => prev.map(msg => 
-      msg._id === updatedMessage._id ? updatedMessage : msg
-    ))
-  })
+    // EDIT: Replace message in same position
+    newSocket.on('message edited', (updatedMessage) => {
+      setMessages(prev => prev.map(msg => 
+        msg._id === updatedMessage._id ? updatedMessage : msg
+      ))
+    })
 
-    // ✅ DELETE: Remove message from array
-  newSocket.on('message deleted', (messageId) => {
-    setMessages(prev => prev.filter(msg => msg._id !== messageId))
-  })
+    // DELETE: Remove message from array
+    newSocket.on('message deleted', (messageId) => {
+      setMessages(prev => prev.filter(msg => msg._id !== messageId))
+    })
 
     // Cleanup on unmount
     return () => {
@@ -189,6 +204,17 @@ const Chat = ({ username, room, onLogout }) => {
       }
 
       console.log('File uploaded successfully:', data)
+      
+      // Emit file upload message through socket
+      if (socket && data.fileUrl) {
+        socket.emit('chat message', {
+          username,
+          room,
+          message: `📎 ${file.name}`,
+          fileUrl: data.fileUrl,
+          fileType: file.type
+        })
+      }
     } catch (error) {
       console.error('File upload error:', error)
       throw error
@@ -197,7 +223,46 @@ const Chat = ({ username, room, onLogout }) => {
 
   return (
     <div id="chat-container">
+      {isConnecting && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: 'rgba(0,0,0,0.3)',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '30px',
+            borderRadius: '8px',
+            textAlign: 'center'
+          }}>
+            <h3>Connecting to room...</h3>
+            <div style={{
+              display: 'inline-block',
+              width: '40px',
+              height: '40px',
+              border: '4px solid #f3f3f3',
+              borderTop: '4px solid #1976d2',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite'
+            }} />
+          </div>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      )}
       <div className="chat-header">
+        {error && <div className="error-message">{error}</div>}
         <div className="header-main">
           <div className="header-info">
             <h2>Room: {room} {isOwner && <span className="owner-badge">(Owner)</span>}</h2>
@@ -209,9 +274,14 @@ const Chat = ({ username, room, onLogout }) => {
               </p>
             )}
           </div>
-          <button onClick={handleLeaveRoom} className="leave-btn">
-            Leave Group
-          </button>
+          <div className="header-actions">
+            <button onClick={handleLeaveRoom} className="leave-btn">
+              Leave Group
+            </button>
+            <button onClick={onLogout} className="logout-btn" title="Logout from app">
+              Logout
+            </button>
+          </div>
         </div>
         
         {isOwner && (

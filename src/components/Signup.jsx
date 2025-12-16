@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-const navigate = useNavigate()
 
 const Signup = () => {
+  const navigate = useNavigate()
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -13,9 +13,15 @@ const Signup = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
     
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match')
+      return
+    }
+    
+    if (!formData.username || !formData.password) {
+      setError('Please fill in all fields')
       return
     }
     
@@ -33,12 +39,14 @@ const Signup = () => {
       const data = await response.json()
       
       if (data.success) {
+        alert('Account created successfully! Please log in.')
         navigate('/login')
       } else {
-        setError(data.error)
+        setError(data.error || 'Signup failed. Please try again.')
       }
     } catch (error) {
-      setError('Signup failed')
+      console.error('Signup error:', error)
+      setError('Signup failed. Please check your connection and try again.')
     }
   }
 
