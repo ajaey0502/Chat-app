@@ -26,26 +26,42 @@ const {Server} = require("socket.io")
 const Message = require("./models/message")
 const app = express()
 const server = createServer(app)
+
+// CORS configuration - environment-aware
+const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:3000').split(',')
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, curl, etc.)
+        if (!origin) return callback(null, true)
+        if (allowedOrigins.some(allowed => origin === allowed.trim())) {
+            callback(null, true)
+        } else {
+            console.log(`❌ CORS blocked origin: ${origin}`)
+            callback(new Error('Not allowed by CORS'))
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}
+
 const io = new Server(server,{
+    cors: corsOptions,
     connectionStateRecovery : {
         maxDisconnectionDuration : 2 * 60 * 1000
     }
 })
 
-// CORS configuration - environment-aware
-const corsOptions = {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    credentials: true
-}
-
 if (process.env.NODE_ENV === 'production') {
-    console.log(`CORS enabled for: ${corsOptions.origin}`)
+    console.log(`CORS enabled for: ${allowedOrigins.join(', ')}`)
 }
 
 app.use(cors(corsOptions))
 
-// Serve React build files (for production)
-app.use(express.static(path.join(__dirname, 'dist')))
+// Health check endpoint (for uptime monitoring)
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
+})
 
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
@@ -73,19 +89,9 @@ console.log('📋 Routes loaded:')
 console.log('  ✅ Static routes: /')
 console.log('  ✅ Chat routes: /chat')
 
-// Handle React Router - serve index.html for all non-API routes
+// Handle unmatched routes
 app.get('*', (req, res) => {
-    // In development, let Vite handle all frontend routes
-    if (process.env.NODE_ENV !== 'production') {
-        return res.status(404).send('Route not found - handled by Vite dev server')
-    }
-    
-    // In production, serve React app for non-API routes
-    if (req.path.startsWith('/api') || req.path.startsWith('/chat') || req.path.startsWith('/socket.io')) {
-        return res.status(404).send('API route not found')
-    }
-    
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+    res.status(404).json({ success: false, error: 'Route not found' })
 })
 
 const Room = require("./models/room")

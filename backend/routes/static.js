@@ -10,7 +10,13 @@ router.post("/api/login", login)
 
 // Logout 
 router.post("/api/logout", (req, res) => {
-    res.clearCookie('authToken')
+    const isProduction = process.env.NODE_ENV === 'production'
+    res.clearCookie('authToken', {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
+        path: '/'
+    })
     return res.json({ success: true, message: "Logged out successfully" })
 })
 
