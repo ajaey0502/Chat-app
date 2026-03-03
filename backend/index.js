@@ -177,6 +177,9 @@ io.on("connection", (socket) => {
     })
     
     socket.on("chat message", async (data) => {
+        // ⚡ Latency measurement: capture server receive time
+        const serverReceiveTime = Date.now()
+        
         // Verify that the username matches the authenticated user
         if (data.username !== socket.authenticatedUser) {
             socket.emit('error', { message: 'Username mismatch - authentication failed' })
@@ -203,12 +206,19 @@ io.on("connection", (socket) => {
             room : data.room,
             message : data.message
         })
-        console.log("message saved")
+        
+        // ⚡ Calculate server processing time
+        const serverProcessingTime = Date.now() - serverReceiveTime
+        console.log(`⚡ Message saved | Server processing: ${serverProcessingTime}ms`)
+        
         io.to(data.room).emit("chat message" ,{
             _id: newMessage._id,
             username : data.username,
             message : data.message,
-            createdAt: newMessage.createdAt
+            createdAt: newMessage.createdAt,
+            // ⚡ Latency measurement data
+            clientSendTime: data.clientSendTime, // Pass through for round-trip calculation
+            serverProcessingTime: serverProcessingTime
         })
     })
 

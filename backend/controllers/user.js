@@ -5,8 +5,8 @@ const { JWT_SECRET } = require("../middleware/auth")
 // Generate JWT token
 const generateToken = (username) => {
     return jwt.sign(
-        { username }, 
-        JWT_SECRET, 
+        { username },
+        JWT_SECRET,
         { expiresIn: '7d' } // Token expires in 7 days
     )
 }
@@ -23,7 +23,7 @@ const validateSignupInput = (username, password) => {
     if (!/^[a-zA-Z0-9_]+$/.test(username)) {
         return { valid: false, error: 'Username can only contain letters, numbers, and underscores' }
     }
-    
+
     // Password validation (strong for signup)
     if (!password || typeof password !== 'string') {
         return { valid: false, error: 'Password is required' }
@@ -35,14 +35,14 @@ const validateSignupInput = (username, password) => {
     if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/.test(password)) {
         return { valid: false, error: 'Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character (@$!%*?&)' }
     }
-    
+
     return { valid: true }
 }
 
 async function signUp(req, res) {
     try {
         const { username, password } = req.body
-        
+
         // Validate input
         const validation = validateSignupInput(username, password)
         if (!validation.valid) {
@@ -51,22 +51,22 @@ async function signUp(req, res) {
                 error: validation.error
             })
         }
-        
+
         const userExists = await User.findOne({ username })
-        
+
         if (userExists) {
             return res.status(400).json({
                 success: false,
                 error: "Username already exists"
             })
         }
-        
+
         const newUser = await User.create({
             username,
             password,
             rooms: []
         })
-        
+
         return res.status(201).json({
             success: true,
             message: "User created successfully",
@@ -86,7 +86,7 @@ async function signUp(req, res) {
 async function login(req, res) {
     try {
         const { username, password } = req.body
-        
+
         // Validate input
         const validation = validateSignupInput(username, password)
         if (!validation.valid) {
@@ -95,7 +95,7 @@ async function login(req, res) {
                 error: validation.error
             })
         }
-        
+
         const user = await User.findOne({ username })
 
         if (!user) {
@@ -104,28 +104,29 @@ async function login(req, res) {
                 error: "Invalid username or password"
             })
         }
-        
+
         // Compare password using bcrypt
         const isPasswordValid = await user.comparePassword(password)
-        
+
         if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
                 error: "Invalid username or password"
             })
         }
-        
+
         // Generate JWT token
         const token = generateToken(username)
-        
+
         // Set HTTP-only cookie
+        const isProduction = process.env.NODE_ENV === 'production'
         res.cookie('authToken', token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isProduction,
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-            sameSite: 'lax'
+            sameSite: isProduction ? 'none' : 'lax'
         })
-        
+
         return res.status(200).json({
             success: true,
             user: {

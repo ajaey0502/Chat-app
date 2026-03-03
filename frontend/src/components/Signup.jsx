@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 const Signup = () => {
   const navigate = useNavigate()
   const [formData, setFormData] = useState({
@@ -14,19 +16,19 @@ const Signup = () => {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    
+
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match')
       return
     }
-    
+
     if (!formData.username || !formData.password) {
       setError('Please fill in all fields')
       return
     }
-    
+
     try {
-      const response = await fetch('/api/signup', {
+      const response = await fetch(`${API_URL}/api/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -35,9 +37,9 @@ const Signup = () => {
           password: formData.password
         })
       })
-      
+
       const data = await response.json()
-      
+
       if (data.success) {
         alert('Account created successfully! Please log in.')
         navigate('/login')
@@ -59,21 +61,21 @@ const Signup = () => {
           type="text"
           placeholder="Username"
           value={formData.username}
-          onChange={(e) => setFormData({...formData, username: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, username: e.target.value })}
           required
         />
         <input
           type="password"
           placeholder="Password"
           value={formData.password}
-          onChange={(e) => setFormData({...formData, password: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
           required
         />
         <input
           type="password"
           placeholder="Confirm Password"
           value={formData.confirmPassword}
-          onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
           required
         />
         <button type="submit">Sign Up</button>

@@ -2,7 +2,9 @@
 import { useNavigate } from 'react-router-dom'
 import './Dashboard.css'
 
-const Dashboard = ({ setCurrentRoom, username ,logout}) => {
+const API_URL = import.meta.env.VITE_API_URL || ''
+
+const Dashboard = ({ setCurrentRoom, username, logout }) => {
   const [rooms, setRooms] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -21,7 +23,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
     try {
       setLoading(true)
       console.log('Fetching rooms...')
-      const response = await fetch('/chat/rooms', {
+      const response = await fetch(`${API_URL}/chat/rooms`, {
         credentials: 'include' // Include cookies for JWT
       })
       console.log('Response status:', response.status)
@@ -47,7 +49,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
 
     try {
       // Check if room exists and user can join
-      const response = await fetch(`/chat?room=${room.name}`, {
+      const response = await fetch(`${API_URL}/chat?room=${room.name}`, {
         credentials: 'include' // Include cookies for JWT
       })
       const data = await response.json()
@@ -73,7 +75,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
     if (!roomName.trim()) return
 
     try {
-      const response = await fetch('/chat/createRoom', {
+      const response = await fetch(`${API_URL}/chat/createRoom`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include', // Include cookies for JWT
@@ -119,12 +121,12 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
   }
 
   const normalizedQuery = searchTerm.trim().toLowerCase()
-  
+
   // Separate logic: joined rooms vs search results
   const userJoinedRooms = rooms.filter((room) => room.members.includes(username))
-  
+
   let displayedRooms = []
-  
+
   if (normalizedQuery) {
     // When searching, show matching public rooms (whether joined or not)
     displayedRooms = rooms.filter((room) => {
@@ -143,7 +145,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
       {error && <div className="error-message">{error}</div>}
 
       <button onClick={logout} className="logout-btn">Logout</button>
-        
+
       <div className="rooms-section">
         <div className="rooms-header">
           <h3>{normalizedQuery ? 'Search Results' : 'My Rooms'}</h3>
@@ -197,8 +199,8 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
           {displayedRooms.length === 0 ? (
             <div className="no-rooms">
               <p>
-                {normalizedQuery 
-                  ? 'No matching public rooms found. Try a different search.' 
+                {normalizedQuery
+                  ? 'No matching public rooms found. Try a different search.'
                   : 'You haven\'t joined any rooms yet. Search for public rooms to join!'}
               </p>
             </div>
@@ -216,7 +218,7 @@ const Dashboard = ({ setCurrentRoom, username ,logout}) => {
                       {room.isPrivate ? ' Private' : ' Public'}
                     </span>
                     <span className="member-count">
-                       {room.members.length} member{room.members.length !== 1 ? 's' : ''}
+                      {room.members.length} member{room.members.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                   {room.owner === username && (

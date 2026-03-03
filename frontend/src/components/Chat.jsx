@@ -1,9 +1,11 @@
-import  { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import io from 'socket.io-client'
 import MessageList from './MessageList'
 import MessageForm from './MessageForm'
 import './Chat.css'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 const Chat = ({ username, room, onLogout }) => {
   const [messages, setMessages] = useState([])
@@ -12,6 +14,7 @@ const Chat = ({ username, room, onLogout }) => {
   const [isOwner, setIsOwner] = useState(false)
   const [error, setError] = useState('')
   const [isConnecting, setIsConnecting] = useState(true)
+  const [latencyStats, setLatencyStats] = useState({ last: null, avg: null, measurements: [] })
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
 
@@ -22,17 +25,17 @@ const Chat = ({ username, room, onLogout }) => {
       navigate('/dashboard')
       return
     }
-    
+
     // Fetch room information for display
     fetchRoomInfo()
   }, [username, room, navigate])
 
   const fetchRoomInfo = async () => {
     try {
-      const response = await fetch(`/chat/room-info?room=${room}`, {
+      const response = await fetch(`${API_URL}/chat/room-info?room=${room}`, {
         credentials: 'include'
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         if (data.success) {
@@ -88,14 +91,30 @@ const Chat = ({ username, room, onLogout }) => {
       setMessages(prevData)
     })
 
-    // Listen for new messages
+    // Listen for new messages with latency measurement
     newSocket.on('chat message', (data) => {
       setMessages(prev => [...prev, data])
+
+      // ⚡ Calculate round-trip latency if this is our own message
+      if (data.clientSendTime) {
+        const roundTripTime = Date.now() - data.clientSendTime
+        console.log(`⚡ LATENCY MEASUREMENT:`)
+        console.log(`   📤 Round-trip time: ${roundTripTime}ms`)
+        console.log(`   🖥️  Server processing: ${data.serverProcessingTime}ms`)
+        console.log(`   🌐 Network time: ${roundTripTime - data.serverProcessingTime}ms`)
+
+        // Update latency stats
+        setLatencyStats(prev => {
+          const newMeasurements = [...prev.measurements, roundTripTime].slice(-10) // Keep last 10
+          const avg = Math.round(newMeasurements.reduce((a, b) => a + b, 0) / newMeasurements.length)
+          return { last: roundTripTime, avg, measurements: newMeasurements }
+        })
+      }
     })
 
     // EDIT: Replace message in same position
     newSocket.on('message edited', (updatedMessage) => {
-      setMessages(prev => prev.map(msg => 
+      setMessages(prev => prev.map(msg =>
         msg._id === updatedMessage._id ? updatedMessage : msg
       ))
     })
@@ -124,9 +143,9 @@ const Chat = ({ username, room, onLogout }) => {
   }, [messages])
 
 
-    // Reusable API call function
+  // Reusable API call function
   const apiCall = async (endpoint, data) => {
-    return fetch(endpoint, {
+    return fetch(`${API_URL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -140,19 +159,20 @@ const Chat = ({ username, room, onLogout }) => {
       setError('Connection lost. Please refresh the page.')
       return
     }
-    
+
     if (message.trim()) {
       socket.emit('chat message', {
         username,
         room,
-        message: message.trim()
+        message: message.trim(),
+        clientSendTime: Date.now() // ⚡ Timestamp for latency measurement
       })
     }
   }
 
   const editMessage = async (messageId, newText) => {
     try {
-      const response = await apiCall('/chat/editMessage', { messageId, newText,room })
+      const response = await apiCall('/chat/editMessage', { messageId, newText, room })
       if (!response.ok) {
         console.error('Failed to edit message')
       }
@@ -175,7 +195,7 @@ const Chat = ({ username, room, onLogout }) => {
   const handleLeaveRoom = async () => {
     try {
       const response = await apiCall('/chat/leaveRoom', { username, room })
-      
+
       if (response.ok) {
         // Redirect to dashboard
         navigate('/dashboard')
@@ -188,10 +208,10 @@ const Chat = ({ username, room, onLogout }) => {
   const handleAddMember = async (e) => {
     e.preventDefault()
     const newMembers = e.target.newMembers.value
-    
+
     try {
-      const response = await apiCall('/chat/add-member', { room,newMembers })
-      
+      const response = await apiCall('/chat/add-member', { room, newMembers })
+
       if (response.ok) {
         e.target.reset()
         alert('Members added successfully!')
@@ -207,20 +227,20 @@ const Chat = ({ username, room, onLogout }) => {
       formData.append('file', file)
       formData.append('room', room)
 
-      const response = await fetch('/chat/upload', {
+      const response = await fetch(`${API_URL}/chat/upload`, {
         method: 'POST',
         credentials: 'include',
         body: formData
       })
 
       const data = await response.json()
-      
+
       if (!response.ok) {
         throw new Error(data.error || 'Upload failed')
       }
 
       console.log('File uploaded successfully:', data)
-      
+
       // Emit file upload message through socket
       if (socket && data.fileUrl) {
         socket.emit('chat message', {
@@ -285,9 +305,25 @@ const Chat = ({ username, room, onLogout }) => {
             <h4>Current User: {username}</h4>
             {roomInfo && (
               <p className="room-details">
-                {roomInfo.isPrivate ? '🔒 Private' : '🌐 Public'} • 
+                {roomInfo.isPrivate ? '🔒 Private' : '🌐 Public'} •
                 👥 {roomInfo.members.length} member{roomInfo.members.length !== 1 ? 's' : ''}
               </p>
+            )}
+            {/* ⚡ Latency Stats Display */}
+            {latencyStats.last !== null && (
+              <div style={{
+                marginTop: '8px',
+                padding: '6px 12px',
+                backgroundColor: latencyStats.last < 100 ? '#4caf50' : latencyStats.last < 200 ? '#ff9800' : '#f44336',
+                color: 'white',
+                borderRadius: '4px',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                display: 'inline-block'
+              }}>
+                ⚡ Latency: {latencyStats.last}ms (avg: {latencyStats.avg}ms)
+                {latencyStats.last < 100 && ' ✓ Under 100ms!'}
+              </div>
             )}
           </div>
           <div className="header-actions">
@@ -296,28 +332,28 @@ const Chat = ({ username, room, onLogout }) => {
             </button>
           </div>
         </div>
-        
+
         {isOwner && (
           <form onSubmit={handleAddMember} className="add-member-form">
-            <input 
-              name="newMembers" 
-              placeholder="Usernames to add (comma-separated)" 
-              required 
-            />  
-             <button type="submit">Add Member</button>
+            <input
+              name="newMembers"
+              placeholder="Usernames to add (comma-separated)"
+              required
+            />
+            <button type="submit">Add Member</button>
           </form>
         )}
       </div>
 
-      <MessageList 
-        messages={messages} 
+      <MessageList
+        messages={messages}
         currentUsername={username}
         onEdit={editMessage}
         onDelete={deleteMessage}
       />
-      
+
       <div ref={messagesEndRef} />
-      
+
       <MessageForm onSendMessage={sendMessage} onFileUpload={handleFileUpload} />
     </div>
   )

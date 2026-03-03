@@ -1,5 +1,7 @@
-import {useState} from 'react'
-import {useNavigate,Link } from 'react-router-dom'
+import { useState } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 const Login = ({ setUser }) => {
   const [formData, setFormData] = useState({
@@ -12,21 +14,21 @@ const Login = ({ setUser }) => {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    
+
     try {
-      const response = await fetch('/api/login', {
+      const response = await fetch(`${API_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(formData)
       })
-      
+
       const data = await response.json()
-      
+
       if (data.success) {
         setUser(data.user.username)
         navigate('/dashboard')
-      } 
+      }
       else {
         setError(data.error || 'Login failed. Please try again.')
       }
@@ -45,14 +47,14 @@ const Login = ({ setUser }) => {
           type="text"
           placeholder="Username"
           value={formData.username}
-          onChange={(e) => setFormData({...formData, username: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, username: e.target.value })}
           required
         />
         <input
           type="password"
           placeholder="Password"
           value={formData.password}
-          onChange={(e) => setFormData({...formData, password: e.target.value})}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
           required
         />
         <button type="submit">Login</button>

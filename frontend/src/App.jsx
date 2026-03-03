@@ -7,6 +7,8 @@ import Dashboard from './components/Dashboard'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function App() {
   const [user, setUser] = useState(null)
   const [currentRoom, setCurrentRoom] = useState(null)
@@ -19,10 +21,10 @@ function App() {
 
   const checkAuth = async () => {
     try {
-      const response = await fetch('/api/me', {
-        credentials: 'include'  
+      const response = await fetch(`${API_URL}/api/me`, {
+        credentials: 'include'
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         if (data.success) {
@@ -30,12 +32,12 @@ function App() {
           // Restore current room from localStorage on app start
           const savedRoom = localStorage.getItem('currentRoom')
           const savedTimestamp = localStorage.getItem('currentRoomTimestamp')
-          
+
           // Check if saved room is still valid (not older than 24 hours)
           if (savedRoom && savedTimestamp) {
             const age = Date.now() - parseInt(savedTimestamp)
             const maxAge = 24 * 60 * 60 * 1000 // 24 hours
-            
+
             if (age < maxAge) {
               setCurrentRoom(savedRoom)
             } else {
@@ -57,7 +59,7 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/logout', {
+      await fetch(`${API_URL}/api/logout`, {
         method: 'POST',
         credentials: 'include'
       })
@@ -83,26 +85,26 @@ function App() {
       <Router>
         <div className="App">
           <Routes>
-             <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
+            <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
             <Route path="/login" element={!user ? <Login setUser={setUser} /> : <Navigate to="/dashboard" />} />
             <Route path="/signup" element={!user ? <Signup /> : <Navigate to="/dashboard" />} />
             <Route path="/dashboard" element=
-            {user ? <Dashboard setCurrentRoom={setCurrentRoom} 
-            username={user} 
-            logout={handleLogout} 
-            /> : <Navigate to="/login" />} />
+              {user ? <Dashboard setCurrentRoom={setCurrentRoom}
+                username={user}
+                logout={handleLogout}
+              /> : <Navigate to="/login" />} />
 
-            <Route path="/chat"  element={
-              user && (currentRoom || localStorage.getItem('currentRoom')) ? 
-              (
-                <Chat 
-                  username={user} 
-                  room={currentRoom || localStorage.getItem('currentRoom')}  
-                  onLogout={handleLogout}
-                /> 
-              ) 
-              : (<Navigate to="/dashboard" /> )
-            } 
+            <Route path="/chat" element={
+              user && (currentRoom || localStorage.getItem('currentRoom')) ?
+                (
+                  <Chat
+                    username={user}
+                    room={currentRoom || localStorage.getItem('currentRoom')}
+                    onLogout={handleLogout}
+                  />
+                )
+                : (<Navigate to="/dashboard" />)
+            }
             />
           </Routes>
         </div>
