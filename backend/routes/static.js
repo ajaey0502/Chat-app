@@ -1,12 +1,22 @@
 const express = require("express")
 const router = express.Router()
+const rateLimit = require('express-rate-limit')
 const { signUp, login } = require("../controllers/user")
 const User = require("../models/user")
 const { authenticateToken } = require("../middleware/auth")
 
+// Rate limiter for auth routes (login/signup) - prevent brute force
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // 20 attempts per window
+    message: { success: false, error: 'Too many attempts. Please try again after 15 minutes.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+})
+
 // Login && SignUp
-router.post("/api/signup", signUp)
-router.post("/api/login", login)
+router.post("/api/signup", authLimiter, signUp)
+router.post("/api/login", authLimiter, login)
 
 // Logout 
 router.post("/api/logout", (req, res) => {

@@ -6,9 +6,15 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "purge:users": "node scripts/purgeUsers.js"
+    "purge:users": "node scripts/purgeUsers.js",
+    "bench": "node scripts/benchmark.js"
   },
-  "keywords": ["chat", "socket.io", "express", "mongodb"],
+  "keywords": [
+    "chat",
+    "socket.io",
+    "express",
+    "mongodb"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -17,12 +23,16 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.2.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.16.1",
     "multer": "^2.0.1",
+    "sanitize-html": "^2.17.1",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "cookie": "^1.1.1",
+    "nodemon": "^3.1.10",
+    "socket.io-client": "^4.8.3"
   }
 }
