@@ -1,12 +1,41 @@
 const express = require("express");
 const router = express.Router();
 const path = require('path');
+const rateLimit = require('express-rate-limit')
 
 const User = require("../models/user")
 const Room = require("../models/room")
 const Message = require("../models/message")
 const { authenticateToken } = require("../middleware/auth")
 const uploadService = require("../services/uploadService")
+const sanitizeHtml = require('sanitize-html')
+
+// Rate limiter for chat actions (edit, delete, room management)
+const chatActionLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 60, // 60 requests per minute
+    message: { success: false, error: 'Too many requests. Please slow down.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+})
+
+// Limiter for room creation
+const roomCreateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 15, // 15 rooms per 15 minutes
+    message: { success: false, error: 'Too many rooms created. Please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+})
+
+// Limiter for file uploads
+const uploadLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 20, // 20 uploads per 5 minutes
+    message: { success: false, error: 'Too many uploads. Please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+})
 
 router.get("/", authenticateToken, async (req, res) => {
     try {
@@ -159,7 +188,7 @@ router.get("/room-info", authenticateToken, async (req, res) => {
     }
 })
 
-router.post("/createRoom", authenticateToken, async (req, res) => {
+router.post("/createRoom", roomCreateLimiter, authenticateToken, async (req, res) => {
     try {
         const { roomName, isPrivate } = req.body
         const owner = req.user.username // Get from JWT token
@@ -210,7 +239,7 @@ router.post("/createRoom", authenticateToken, async (req, res) => {
 
 ///////////////////////////////////
 
-router.post("/add-member", authenticateToken, async (req, res) => {
+router.post("/add-member", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const { room, newMembers} = req.body
         const requester = req.user.username
@@ -278,7 +307,7 @@ router.post("/add-member", authenticateToken, async (req, res) => {
 ///////////////////////////////
 
 // Owner-only ban (public rooms): remove member and prevent rejoin
-router.post("/ban", authenticateToken, async (req, res) => {
+router.post("/ban", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const owner = req.user.username
         const { room, targetUser } = req.body
@@ -352,7 +381,7 @@ router.post("/ban", authenticateToken, async (req, res) => {
 ///////////////////////////////
 
 // Owner can transfer room ownership to another member
-router.post("/transfer-ownership", authenticateToken, async (req, res) => {
+router.post("/transfer-ownership", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const owner = req.user.username
         const { room, newOwner } = req.body
@@ -408,7 +437,7 @@ router.post("/transfer-ownership", authenticateToken, async (req, res) => {
 ///////////////////////////////
 
 
-router.post("/leaveRoom", authenticateToken, async (req, res) => {
+router.post("/leaveRoom", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const username = req.user.username // Use authenticated user, not body
         const { room } = req.body
@@ -475,13 +504,19 @@ router.post("/leaveRoom", authenticateToken, async (req, res) => {
 
 ////////////////////////////
 
-router.post("/editMessage", authenticateToken, async (req, res) => {
+router.post("/editMessage", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const { messageId, newText, room } = req.body
-        
+
+        // Sanitize edited message content to prevent XSS
+        const cleanText = sanitizeHtml(newText, { allowedTags: [], allowedAttributes: {} })
+        if (!cleanText.trim()) {
+            return res.status(400).json({ success: false, error: 'Message cannot be empty' })
+        }
+
         const updatedMessage = await Message.findByIdAndUpdate(
             messageId,
-            { $set: { message: newText, edited: true } },
+            { $set: { message: cleanText, edited: true } },
             { new: true }
         )
         
@@ -509,7 +544,7 @@ router.post("/editMessage", authenticateToken, async (req, res) => {
     }
 })
 
-router.post("/deleteMessage", authenticateToken, async (req, res) => {
+router.post("/deleteMessage", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const { messageId, room } = req.body
         
@@ -556,7 +591,7 @@ router.get("/uploads/:filename", (req, res) => {
 })
 
 // File upload route
-router.post("/upload", authenticateToken, uploadService.getUploadMiddleware(), async (req, res) => {
+router.post("/upload", uploadLimiter, authenticateToken, uploadService.getUploadMiddleware(), async (req, res) => {
     try {
         // Validate upload using the service
         const validation = uploadService.validateUpload(req);

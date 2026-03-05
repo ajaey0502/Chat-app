@@ -5,9 +5,30 @@ const express = require('express')
 const path = require("path")
 const cookieParser = require('cookie-parser')
 const cors = require('cors')
+const sanitizeHtml = require('sanitize-html')
 
 const mongoose = require('mongoose')
 mongoose.connect(process.env.MONGODB_URI || "mongodb://localhost:27017/chatapp").then(() => console.log("✅ MongoDB connected"))
+
+// In-memory rate limiter for socket messages
+const socketRateLimits = new Map()
+const SOCKET_MSG_LIMIT = 30 // max messages
+const SOCKET_MSG_WINDOW = 10 * 1000 // per 10 seconds
+
+function isSocketRateLimited(userId) {
+    const now = Date.now()
+    if (!socketRateLimits.has(userId)) {
+        socketRateLimits.set(userId, [])
+    }
+    const timestamps = socketRateLimits.get(userId).filter(t => now - t < SOCKET_MSG_WINDOW)
+    if (timestamps.length >= SOCKET_MSG_LIMIT) {
+        socketRateLimits.set(userId, timestamps)
+        return true
+    }
+    timestamps.push(now)
+    socketRateLimits.set(userId, timestamps)
+    return false
+}
 
 // Add connection monitoring
 mongoose.connection.on('error', (err) => {
@@ -20,8 +41,8 @@ mongoose.connection.on('disconnected', () => {
 
 const staticRoute = require("./routes/static")
 const chatRoute = require("./routes/chat")
-const {createServer}  = require("node:http")
-const {Server} = require("socket.io")
+const { createServer } = require("node:http")
+const { Server } = require("socket.io")
 
 const Message = require("./models/message")
 const app = express()
@@ -45,10 +66,10 @@ const corsOptions = {
     allowedHeaders: ['Content-Type', 'Authorization']
 }
 
-const io = new Server(server,{
+const io = new Server(server, {
     cors: corsOptions,
-    connectionStateRecovery : {
-        maxDisconnectionDuration : 2 * 60 * 1000
+    connectionStateRecovery: {
+        maxDisconnectionDuration: 2 * 60 * 1000
     }
 })
 
@@ -66,24 +87,24 @@ app.get('/health', (req, res) => {
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
 
-app.use(express.urlencoded({ extended : true}))
+app.use(express.urlencoded({ extended: true }))
 app.use(express.json());
 app.use(cookieParser());
 
 // Add request logging for debugging
 app.use((req, res, next) => {
-  console.log(`🌐 ${req.method} ${req.path}`)
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log('📦 Request body:', req.body)
-  }
-  next()
+    console.log(`🌐 ${req.method} ${req.path}`)
+    if (req.body && Object.keys(req.body).length > 0) {
+        console.log('📦 Request body:', req.body)
+    }
+    next()
 })
 
 // Make io accessible to routes
 app.set('io', io)
 
-app.use("/" ,staticRoute)
-app.use("/chat",chatRoute)
+app.use("/", staticRoute)
+app.use("/chat", chatRoute)
 
 console.log('📋 Routes loaded:')
 console.log('  ✅ Static routes: /')
@@ -100,11 +121,11 @@ const { verifyToken } = require("./middleware/auth")
 // Socket.io authentication middleware
 io.use((socket, next) => {
     const cookies = socket.handshake.headers.cookie
-    
+
     if (!cookies) {
         return next(new Error('Authentication required'))
     }
-    
+
     // Parse cookies safely to extract authToken
     const cookieObj = {}
     cookies.split(';').forEach(cookie => {
@@ -113,20 +134,20 @@ io.use((socket, next) => {
             cookieObj[key.trim()] = decodeURIComponent(value)
         }
     })
-    
+
     const token = cookieObj.authToken
-    
+
     if (!token) {
         return next(new Error('Authentication token not found'))
     }
-    
+
     // Verify token
     const decoded = verifyToken(token)
-    
+
     if (!decoded) {
         return next(new Error('Invalid authentication token'))
     }
-    
+
     // Store authenticated username in socket
     socket.authenticatedUser = decoded.username
     next()
@@ -134,7 +155,7 @@ io.use((socket, next) => {
 
 io.on("connection", (socket) => {
     console.log(`✅ User connected: ${socket.authenticatedUser}`)
-    
+
     socket.on('join room', async ({ username, room }) => {
         // Verify that the username matches the authenticated user
         if (username !== socket.authenticatedUser) {
@@ -144,7 +165,7 @@ io.on("connection", (socket) => {
         try {
             // Check if room exists and user has permission
             const roomDoc = await Room.findOne({ name: room })
-            
+
             if (!roomDoc) {
                 socket.emit('join error', { message: 'Room not found' })
                 return
@@ -155,37 +176,43 @@ io.on("connection", (socket) => {
                 socket.emit('join error', { message: 'You are banned from this room' })
                 return
             }
-            
+
             // Check private room access
             if (roomDoc.isPrivate && !roomDoc.members.includes(username)) {
                 socket.emit('join error', { message: 'Access denied to private room' })
                 return
             }
-            
+
             // Join the room
             socket.join(room)
-            
+
             // Notify user of successful join
             socket.emit('join success', { message: `Joined room ${room}` })
-            
+
             // Notify others in room
             io.to(room).emit('user joined', { username, message: `${username} joined the room` })
-            
+
             // Get previous messages
             const prevMessages = await Message.find({ room }).sort({ createdAt: -1 }).limit(50)
             prevMessages.reverse()
             socket.emit("prev", prevMessages)
-            
+
         } catch (error) {
             console.error('Join room error:', error)
             socket.emit('join error', { message: 'Server error' })
         }
     })
-    
+
     socket.on("chat message", async (data) => {
         // ⚡ Latency measurement: capture server receive time
         const serverReceiveTime = Date.now()
-        
+
+        // Rate limit socket messages
+        if (isSocketRateLimited(socket.authenticatedUser)) {
+            socket.emit('error', { message: 'You are sending messages too fast. Please slow down.' })
+            return
+        }
+
         // Verify that the username matches the authenticated user
         if (data.username !== socket.authenticatedUser) {
             socket.emit('error', { message: 'Username mismatch - authentication failed' })
@@ -207,25 +234,37 @@ io.on("connection", (socket) => {
             return
         }
 
+        // Sanitize message content to prevent XSS
+        const cleanMessage = sanitizeHtml(data.message, { allowedTags: [], allowedAttributes: {} })
+        if (!cleanMessage.trim()) {
+            socket.emit('error', { message: 'Message cannot be empty' })
+            return
+        }
+
         const newMessage = await Message.create({
-            username : data.username,
-            room : data.room,
-            message : data.message
+            username: data.username,
+            room: data.room,
+            message: cleanMessage
         })
-        
+
         // ⚡ Calculate server processing time
         const serverProcessingTime = Date.now() - serverReceiveTime
         console.log(`⚡ Message saved | Server processing: ${serverProcessingTime}ms`)
-        
-        io.to(data.room).emit("chat message" ,{
+
+        io.to(data.room).emit("chat message", {
             _id: newMessage._id,
-            username : data.username,
-            message : data.message,
+            username: data.username,
+            message: cleanMessage,
             createdAt: newMessage.createdAt,
             // ⚡ Latency measurement data
             clientSendTime: data.clientSendTime, // Pass through for round-trip calculation
             serverProcessingTime: serverProcessingTime
         })
+    })
+
+    // ⚡ Benchmark: echo-back for RTT measurement
+    socket.on('ping_bench', (data) => {
+        socket.emit('pong_bench', data)
     })
 
     // Handle socket disconnection
@@ -236,7 +275,7 @@ io.on("connection", (socket) => {
 })
 
 
-server.listen(port,() => {
+server.listen(port, () => {
     console.log(`🚀 Server running on http://localhost:${port}`)
     console.log(`📱 Frontend dev server: http://localhost:3000`)
     console.log(`🔌 Socket.io ready for connections`)
