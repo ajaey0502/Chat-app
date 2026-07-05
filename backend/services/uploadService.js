@@ -2,6 +2,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads'
+const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE, 10) || 50 * 1024 * 1024
+
 class UploadService {
     constructor() {
         this.setupStorage();
@@ -12,12 +15,11 @@ class UploadService {
     setupStorage() {
         this.storage = multer.diskStorage({
             destination: function (req, file, cb) {
-                const uploadDir = 'uploads/';
                 // Ensure uploads directory exists
-                if (!fs.existsSync(uploadDir)) {
-                    fs.mkdirSync(uploadDir, { recursive: true });
+                if (!fs.existsSync(UPLOAD_DIR)) {
+                    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
                 }
-                cb(null, uploadDir)
+                cb(null, UPLOAD_DIR)
             },
             filename: function (req, file, cb) {
                 // Generate unique filename with timestamp
@@ -46,7 +48,7 @@ class UploadService {
             storage: this.storage,
             fileFilter: this.fileFilter,
             limits: {
-                fileSize: 50 * 1024 * 1024 // 50MB limit
+                fileSize: MAX_FILE_SIZE
             }
         });
     }
@@ -67,7 +69,7 @@ class UploadService {
     }
 
     deleteFile(filename) {
-        const filepath = path.join(__dirname, '..', 'uploads', filename);
+        const filepath = path.join(__dirname, '..', UPLOAD_DIR, filename);
         if (fs.existsSync(filepath)) {
             fs.unlinkSync(filepath);
             return true;
@@ -95,3 +97,4 @@ class UploadService {
 }
 
 module.exports = new UploadService();
+module.exports.UPLOAD_DIR = UPLOAD_DIR;

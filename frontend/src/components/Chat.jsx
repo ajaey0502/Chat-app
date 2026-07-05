@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import io from 'socket.io-client'
 import MessageList from './MessageList'
 import MessageForm from './MessageForm'
+import { useToast } from './Toast'
 import './Chat.css'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
@@ -15,8 +16,17 @@ const Chat = ({ username, room, onLogout }) => {
   const [error, setError] = useState('')
   const [isConnecting, setIsConnecting] = useState(true)
   const [latencyStats, setLatencyStats] = useState({ last: null, avg: null, measurements: [] })
+  const [hasMoreMessages, setHasMoreMessages] = useState(false)
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  const [showMembers, setShowMembers] = useState(false)
+  const [onlineUsers, setOnlineUsers] = useState(new Set())
+  const [seenCutoff, setSeenCutoff] = useState(null)
   const messagesEndRef = useRef(null)
+  const messagesListRef = useRef(null)
+  const skipAutoScrollRef = useRef(false)
+  const prevScrollHeightRef = useRef(0)
   const navigate = useNavigate()
+  const { showToast } = useToast()
 
   // missing props
   useEffect(() => {
@@ -86,9 +96,44 @@ const Chat = ({ username, room, onLogout }) => {
       console.log(data.message)
     })
 
-    // Listen for previous messages
-    newSocket.on('prev', (prevData) => {
-      setMessages(prevData)
+    // Initial snapshot of who's online in this room, sent right after joining
+    newSocket.on('presence list', (data) => {
+      setOnlineUsers(new Set(data.onlineUsers))
+    })
+
+    // Live online/offline updates as members connect/disconnect
+    newSocket.on('presence update', (data) => {
+      setOnlineUsers(prev => {
+        const next = new Set(prev)
+        if (data.online) {
+          next.add(data.username)
+        } else {
+          next.delete(data.username)
+        }
+        return next
+      })
+    })
+
+    // "Seen by all" cutoff - messages at or before this time have been read
+    // by every member of the room
+    newSocket.on('seen update', (data) => {
+      setSeenCutoff(new Date(data.cutoff).getTime())
+    })
+
+    // Listen for previous messages (most recent page)
+    newSocket.on('prev', (data) => {
+      setMessages(data.messages)
+      setHasMoreMessages(data.hasMore)
+    })
+
+    // Listen for an older page of history requested via loadOlderMessages
+    newSocket.on('older messages', (data) => {
+      const container = messagesListRef.current
+      prevScrollHeightRef.current = container ? container.scrollHeight : 0
+      skipAutoScrollRef.current = true
+      setMessages(prev => [...data.messages, ...prev])
+      setHasMoreMessages(data.hasMore)
+      setIsLoadingOlder(false)
     })
 
     // Listen for new messages with latency measurement
@@ -129,7 +174,11 @@ const Chat = ({ username, room, onLogout }) => {
       newSocket.off('join success')
       newSocket.off('join error')
       newSocket.off('user joined')
+      newSocket.off('presence list')
+      newSocket.off('presence update')
+      newSocket.off('seen update')
       newSocket.off('prev')
+      newSocket.off('older messages')
       newSocket.off('chat message')
       newSocket.off('message edited')
       newSocket.off('message deleted')
@@ -138,9 +187,25 @@ const Chat = ({ username, room, onLogout }) => {
   }, [username, room, navigate])
 
   useEffect(() => {
-    // Auto-scroll to bottom
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (skipAutoScrollRef.current) {
+      // Just prepended older history - keep the user's viewport anchored
+      // to the same message instead of jumping to the bottom or top
+      const container = messagesListRef.current
+      if (container) {
+        container.scrollTop = container.scrollHeight - prevScrollHeightRef.current
+      }
+      skipAutoScrollRef.current = false
+    } else {
+      // Auto-scroll to bottom for new/live messages
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages])
+
+  const loadOlderMessages = () => {
+    if (!socket || !hasMoreMessages || isLoadingOlder || messages.length === 0) return
+    setIsLoadingOlder(true)
+    socket.emit('load older messages', { room, before: messages[0]._id })
+  }
 
 
   // Reusable API call function
@@ -214,10 +279,30 @@ const Chat = ({ username, room, onLogout }) => {
 
       if (response.ok) {
         e.target.reset()
-        alert('Members added successfully!')
+        showToast('Members added successfully!', 'success')
       }
     } catch (error) {
       console.error('Error adding members:', error)
+      showToast('Failed to add members. Please try again.', 'error')
+    }
+  }
+
+  const handleRemoveMember = async (targetUser) => {
+    if (!window.confirm(`Remove ${targetUser} from this room?`)) return
+
+    try {
+      const response = await apiCall('/chat/remove-member', { room, targetUser })
+      const data = await response.json()
+
+      if (response.ok) {
+        showToast(`${targetUser} removed from room`, 'success')
+        fetchRoomInfo()
+      } else {
+        showToast(data.error || 'Failed to remove member', 'error')
+      }
+    } catch (error) {
+      console.error('Error removing member:', error)
+      showToast('Failed to remove member', 'error')
     }
   }
 
@@ -305,9 +390,41 @@ const Chat = ({ username, room, onLogout }) => {
             <h4>Current User: {username}</h4>
             {roomInfo && (
               <p className="room-details">
-                {roomInfo.isPrivate ? '🔒 Private' : '🌐 Public'} •
-                👥 {roomInfo.members.length} member{roomInfo.members.length !== 1 ? 's' : ''}
+                {roomInfo.isPrivate ? '🔒 Private' : '🌐 Public'} •{' '}
+                <button
+                  type="button"
+                  className="member-toggle"
+                  onClick={() => setShowMembers(s => !s)}
+                >
+                  👥 {roomInfo.members.length} member{roomInfo.members.length !== 1 ? 's' : ''}
+                </button>
               </p>
+            )}
+
+            {showMembers && roomInfo && (
+              <div className="members-panel">
+                {roomInfo.members.map(member => (
+                  <div key={member} className="member-row">
+                    <span>
+                      <span
+                        className={`presence-dot ${onlineUsers.has(member) ? 'online' : 'offline'}`}
+                        title={onlineUsers.has(member) ? 'Online' : 'Offline'}
+                      />
+                      {member}
+                      {member === roomInfo.owner && <span className="owner-badge-inline">Owner</span>}
+                    </span>
+                    {isOwner && roomInfo.isPrivate && member !== username && (
+                      <button
+                        type="button"
+                        className="remove-member-btn"
+                        onClick={() => handleRemoveMember(member)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
             {/* ⚡ Latency Stats Display */}
             {latencyStats.last !== null && (
@@ -345,11 +462,23 @@ const Chat = ({ username, room, onLogout }) => {
         )}
       </div>
 
+      {hasMoreMessages && (
+        <button
+          onClick={loadOlderMessages}
+          disabled={isLoadingOlder}
+          className="load-more-btn"
+        >
+          {isLoadingOlder ? 'Loading...' : 'Load older messages'}
+        </button>
+      )}
+
       <MessageList
         messages={messages}
         currentUsername={username}
         onEdit={editMessage}
         onDelete={deleteMessage}
+        listRef={messagesListRef}
+        seenCutoff={seenCutoff}
       />
 
       <div ref={messagesEndRef} />

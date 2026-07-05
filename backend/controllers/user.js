@@ -39,6 +39,18 @@ const validateSignupInput = (username, password) => {
     return { valid: true }
 }
 
+// Login only needs to know a username/password were provided - whether they're
+// *correct* is decided by comparePassword below, not by signup's complexity rules
+const validateLoginInput = (username, password) => {
+    if (!username || typeof username !== 'string') {
+        return { valid: false, error: 'Username is required' }
+    }
+    if (!password || typeof password !== 'string') {
+        return { valid: false, error: 'Password is required' }
+    }
+    return { valid: true }
+}
+
 async function signUp(req, res) {
     try {
         const { username, password } = req.body
@@ -88,7 +100,7 @@ async function login(req, res) {
         const { username, password } = req.body
 
         // Validate input
-        const validation = validateSignupInput(username, password)
+        const validation = validateLoginInput(username, password)
         if (!validation.valid) {
             return res.status(400).json({
                 success: false,

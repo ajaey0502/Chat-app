@@ -333,6 +333,18 @@
   letter-spacing: 0.05em;
 }
 
+.unread-badge {
+  display: inline-block;
+  margin-left: 8px;
+  background: #ef4444;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: var(--radius-full, 9999px);
+  vertical-align: middle;
+}
+
 /* No Rooms Message */
 .no-rooms {
   text-align: center;

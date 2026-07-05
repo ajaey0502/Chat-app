@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-const Message = ({ message, isOwn, onEdit, onDelete }) => {
+const Message = ({ message, isOwn, onEdit, onDelete, seenByAll }) => {
   const [isEditing, setIsEditing] = useState(false)
   const [editText, setEditText] = useState(message.message)
 
@@ -36,7 +36,9 @@ const Message = ({ message, isOwn, onEdit, onDelete }) => {
   }
 
   const handleDelete = () => {
-    onDelete(message._id)
+    if (window.confirm('Delete this message? This cannot be undone.')) {
+      onDelete(message._id)
+    }
   }
 
   const handleKeyPress = (e) => {
@@ -107,6 +109,9 @@ const Message = ({ message, isOwn, onEdit, onDelete }) => {
               </div>
             ) : (
               <span className="message-text">{message.message}</span>
+            )}
+            {isOwn && seenByAll && (
+              <span className="seen-indicator" title="Seen by everyone in this room">✓ Seen</span>
             )}
           </span>
           {isOwn && canModify && !hasFile && (

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useToast } from './Toast'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 
 const Signup = () => {
   const navigate = useNavigate()
+  const { showToast } = useToast()
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -41,7 +43,7 @@ const Signup = () => {
       const data = await response.json()
 
       if (data.success) {
-        alert('Account created successfully! Please log in.')
+        showToast('Account created successfully! Please log in.', 'success')
         navigate('/login')
       } else {
         setError(data.error || 'Signup failed. Please try again.')

@@ -6,9 +6,11 @@ const rateLimit = require('express-rate-limit')
 const User = require("../models/user")
 const Room = require("../models/room")
 const Message = require("../models/message")
+const ReadReceipt = require("../models/readReceipt")
 const { authenticateToken } = require("../middleware/auth")
 const uploadService = require("../services/uploadService")
 const sanitizeHtml = require('sanitize-html')
+const { MAX_MESSAGE_LENGTH, EDIT_WINDOW_MS } = require("../constants")
 
 // Rate limiter for chat actions (edit, delete, room management)
 const chatActionLimiter = rateLimit({
@@ -122,12 +124,38 @@ router.get("/rooms", authenticateToken, async (req, res) => {
         }).select('name members isPrivate owner createdAt')
 
         const allRooms = [...publicRooms, ...privateRooms]
-        
+
         console.log('📋 Found rooms:', allRooms.length)
-        
+
+        // Compute unread counts for rooms the user has actually joined
+        const joinedRoomNames = allRooms
+            .filter(r => r.members.includes(username))
+            .map(r => r.name)
+
+        const readReceipts = await ReadReceipt.find({ username, room: { $in: joinedRoomNames } })
+        const lastReadMap = new Map(readReceipts.map(r => [r.room, r.lastReadAt]))
+
+        const unreadCounts = await Promise.all(
+            joinedRoomNames.map(async (roomName) => {
+                const lastReadAt = lastReadMap.get(roomName) || new Date(0)
+                const count = await Message.countDocuments({
+                    room: roomName,
+                    createdAt: { $gt: lastReadAt },
+                    username: { $ne: username }
+                })
+                return [roomName, count]
+            })
+        )
+        const unreadMap = Object.fromEntries(unreadCounts)
+
+        const roomsWithUnread = allRooms.map(r => ({
+            ...r.toObject(),
+            unreadCount: unreadMap[r.name] || 0
+        }))
+
         return res.json({
             success: true,
-            rooms: allRooms
+            rooms: roomsWithUnread
         })
     } catch (error) {
         console.error('Get rooms error:', error)
@@ -228,6 +256,14 @@ router.post("/createRoom", roomCreateLimiter, authenticateToken, async (req, res
             message: "Room created successfully"
         })
     } catch (error) {
+        // Two near-simultaneous requests can both pass the findOne check above -
+        // the unique index on Room.name is the real guard, so handle its violation
+        if (error.code === 11000) {
+            return res.status(409).json({
+                success: false,
+                error: "Room name already exists"
+            })
+        }
         console.error('Create room error:', error)
         return res.status(500).json({
             success: false,
@@ -267,22 +303,34 @@ router.post("/add-member", chatActionLimiter, authenticateToken, async (req, res
             })
         }
 
-        const membersToAdd = newMembers.split(",").map(u => u.trim()).filter(Boolean)
-        if (membersToAdd.length === 0) {
+        const requestedMembers = newMembers.split(",").map(u => u.trim()).filter(Boolean)
+        if (requestedMembers.length === 0) {
             return res.status(400).json({
                 success: false,
                 error: "No valid members provided"
             })
         }
-        
+
+        // Only add usernames that correspond to real accounts
+        const existingUsers = await User.find({ username: { $in: requestedMembers } }).select('username')
+        const membersToAdd = existingUsers.map(u => u.username)
+        const notFound = requestedMembers.filter(u => !membersToAdd.includes(u))
+
+        if (membersToAdd.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "None of the provided usernames exist"
+            })
+        }
+
         await Room.updateOne(
             { name: room },
-            { 
+            {
                 $addToSet: { members: { $each: membersToAdd } },
                 $pull: { bannedMembers: { $in: membersToAdd } } // Unban when re-adding
             }
         )
-        
+
         // Add room to each new member's rooms list
         for (const member of membersToAdd) {
             await User.updateOne(
@@ -290,10 +338,12 @@ router.post("/add-member", chatActionLimiter, authenticateToken, async (req, res
                 { $addToSet: { rooms: room } }
             )
         }
-        
+
         return res.json({
             success: true,
-            message: "Members added successfully"
+            message: notFound.length > 0
+                ? `Added ${membersToAdd.length} member(s). Not found: ${notFound.join(', ')}`
+                : "Members added successfully"
         })
     } catch (error) {
         console.error('Add member error:', error)
@@ -371,6 +421,73 @@ router.post("/ban", chatActionLimiter, authenticateToken, async (req, res) => {
         })
     } catch (error) {
         console.error('Ban member error:', error)
+        return res.status(500).json({
+            success: false,
+            error: "Server error"
+        })
+    }
+})
+
+///////////////////////////////
+
+// Owner-only removal for private rooms (no ban list needed - membership already gates access)
+router.post("/remove-member", chatActionLimiter, authenticateToken, async (req, res) => {
+    try {
+        const owner = req.user.username
+        const { room, targetUser } = req.body
+
+        if (!room || !targetUser) {
+            return res.status(400).json({
+                success: false,
+                error: "Room and targetUser are required"
+            })
+        }
+
+        const roomDoc = await Room.findOne({ name: room })
+        if (!roomDoc) {
+            return res.status(404).json({
+                success: false,
+                error: "Room not found"
+            })
+        }
+
+        if (roomDoc.owner !== owner) {
+            return res.status(403).json({
+                success: false,
+                error: "Only the room owner can remove members"
+            })
+        }
+
+        if (targetUser === owner) {
+            return res.status(400).json({
+                success: false,
+                error: "Owner cannot remove themselves - transfer ownership or leave the room instead"
+            })
+        }
+
+        if (!roomDoc.isPrivate) {
+            return res.status(400).json({
+                success: false,
+                error: "Use ban to remove members from a public room"
+            })
+        }
+
+        await Room.updateOne(
+            { name: room },
+            { $pull: { members: targetUser } }
+        )
+
+        await User.updateOne(
+            { username: targetUser },
+            { $pull: { rooms: room } }
+        )
+
+        return res.json({
+            success: true,
+            message: "Member removed from room"
+        })
+    } catch (error) {
+        console.error('Remove member error:', error)
         return res.status(500).json({
             success: false,
             error: "Server error"
@@ -461,6 +578,7 @@ router.post("/leaveRoom", chatActionLimiter, authenticateToken, async (req, res)
         if (roomDoc.owner === username && roomDoc.members.length <= 1) {
             await Message.deleteMany({ room })
             await Room.deleteOne({ name: room })
+            await ReadReceipt.deleteMany({ room })
             await User.updateMany(
                 { rooms: room },
                 { $pull: { rooms: room } }
@@ -507,6 +625,19 @@ router.post("/leaveRoom", chatActionLimiter, authenticateToken, async (req, res)
 router.post("/editMessage", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const { messageId, newText, room } = req.body
+        const username = req.user.username
+
+        if (!messageId || !room) {
+            return res.status(400).json({ success: false, error: 'messageId and room are required' })
+        }
+
+        if (typeof newText !== 'string') {
+            return res.status(400).json({ success: false, error: 'Message cannot be empty' })
+        }
+
+        if (newText.length > MAX_MESSAGE_LENGTH) {
+            return res.status(400).json({ success: false, error: `Message cannot exceed ${MAX_MESSAGE_LENGTH} characters` })
+        }
 
         // Sanitize edited message content to prevent XSS
         const cleanText = sanitizeHtml(newText, { allowedTags: [], allowedAttributes: {} })
@@ -514,27 +645,37 @@ router.post("/editMessage", chatActionLimiter, authenticateToken, async (req, re
             return res.status(400).json({ success: false, error: 'Message cannot be empty' })
         }
 
+        const existingMessage = await Message.findById(messageId)
+        if (!existingMessage) {
+            return res.status(404).json({ success: false, error: "Message not found" })
+        }
+
+        if (existingMessage.room !== room) {
+            return res.status(400).json({ success: false, error: "Message does not belong to this room" })
+        }
+
+        if (existingMessage.username !== username) {
+            return res.status(403).json({ success: false, error: "You can only edit your own messages" })
+        }
+
+        if (Date.now() - new Date(existingMessage.createdAt).getTime() > EDIT_WINDOW_MS) {
+            return res.status(403).json({ success: false, error: "This message can no longer be edited (15 minute window expired)" })
+        }
+
         const updatedMessage = await Message.findByIdAndUpdate(
             messageId,
             { $set: { message: cleanText, edited: true } },
             { new: true }
         )
-        
-        if (updatedMessage) {
-            // Get io instance and emit to room
-            const io = req.app.get('io')
-            io.to(room).emit('message edited', updatedMessage)
-            
-            return res.json({
-                success: true,
-                message: "Message updated successfully"
-            })
-        } else {
-            return res.status(404).json({
-                success: false,
-                error: "Message not found"
-            })
-        }
+
+        // Get io instance and emit to room
+        const io = req.app.get('io')
+        io.to(room).emit('message edited', updatedMessage)
+
+        return res.json({
+            success: true,
+            message: "Message updated successfully"
+        })
     } catch (error) {
         console.error('Edit message error:', error)
         return res.status(500).json({
@@ -547,24 +688,39 @@ router.post("/editMessage", chatActionLimiter, authenticateToken, async (req, re
 router.post("/deleteMessage", chatActionLimiter, authenticateToken, async (req, res) => {
     try {
         const { messageId, room } = req.body
-        
-        const deletedMessage = await Message.findByIdAndDelete(messageId)
-        
-        if (deletedMessage) {
-            // Get io instance and emit to room
-            const io = req.app.get('io')
-            io.to(room).emit('message deleted', messageId)
-            
-            return res.json({
-                success: true,
-                message: "Message deleted successfully"
-            })
-        } else {
-            return res.status(404).json({
-                success: false,
-                error: "Message not found"
-            })
+        const username = req.user.username
+
+        if (!messageId || !room) {
+            return res.status(400).json({ success: false, error: 'messageId and room are required' })
         }
+
+        const existingMessage = await Message.findById(messageId)
+        if (!existingMessage) {
+            return res.status(404).json({ success: false, error: "Message not found" })
+        }
+
+        if (existingMessage.room !== room) {
+            return res.status(400).json({ success: false, error: "Message does not belong to this room" })
+        }
+
+        if (existingMessage.username !== username) {
+            return res.status(403).json({ success: false, error: "You can only delete your own messages" })
+        }
+
+        if (Date.now() - new Date(existingMessage.createdAt).getTime() > EDIT_WINDOW_MS) {
+            return res.status(403).json({ success: false, error: "This message can no longer be deleted (15 minute window expired)" })
+        }
+
+        await Message.findByIdAndDelete(messageId)
+
+        // Get io instance and emit to room
+        const io = req.app.get('io')
+        io.to(room).emit('message deleted', messageId)
+
+        return res.json({
+            success: true,
+            message: "Message deleted successfully"
+        })
     } catch (error) {
         console.error('Delete message error:', error)
         return res.status(500).json({
@@ -579,7 +735,7 @@ module.exports = router;
 // Route to serve uploaded files
 router.get("/uploads/:filename", (req, res) => {
     const filename = req.params.filename
-    const filepath = path.join(__dirname, '..', 'uploads', filename)
+    const filepath = path.join(__dirname, '..', uploadService.UPLOAD_DIR, filename)
     
     // Set appropriate Content-Type for PDFs
     if (filename.endsWith('.pdf')) {

@@ -1,9 +1,11 @@
 import React, { useState, useRef } from 'react'
+import { useToast } from './Toast'
 
 const MessageForm = ({ onSendMessage, onFileUpload }) => {
   const [message, setMessage] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef(null)
+  const { showToast } = useToast()
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -19,7 +21,7 @@ const MessageForm = ({ onSendMessage, onFileUpload }) => {
       // Validate file size (max 10MB)
       const maxSize = 10 * 1024 * 1024
       if (file.size > maxSize) {
-        alert('File size exceeds 10MB limit')
+        showToast('File size exceeds 10MB limit', 'error')
         if (fileInputRef.current) {
           fileInputRef.current.value = ''
         }
@@ -33,7 +35,7 @@ const MessageForm = ({ onSendMessage, onFileUpload }) => {
         console.log('File uploaded successfully')
       } catch (error) {
         console.error('File upload failed:', error)
-        alert('File upload failed. Please try again.')
+        showToast('File upload failed. Please try again.', 'error')
       } finally {
         setIsUploading(false)
         // Reset file input

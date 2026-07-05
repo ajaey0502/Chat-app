@@ -212,7 +212,12 @@ const Dashboard = ({ setCurrentRoom, username, logout }) => {
                 onClick={() => handleJoinRoom(room)}
               >
                 <div className="room-info">
-                  <h4>{room.name}</h4>
+                  <h4>
+                    {room.name}
+                    {room.unreadCount > 0 && (
+                      <span className="unread-badge">{room.unreadCount > 99 ? '99+' : room.unreadCount}</span>
+                    )}
+                  </h4>
                   <div className="room-details">
                     <span className={`room-type ${room.isPrivate ? 'private' : 'public'}`}>
                       {room.isPrivate ? ' Private' : ' Public'}
